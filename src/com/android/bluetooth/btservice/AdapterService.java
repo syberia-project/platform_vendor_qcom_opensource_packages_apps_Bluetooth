@@ -2472,7 +2472,9 @@ public class AdapterService extends Service {
             return false;
         }
         deviceProp.setBondingInitiatedLocally(false);
-
+        if (device.isTwsPlusDevice()) {
+            mActiveDeviceManager.notify_active_device_unbonding(device);
+        }
         Message msg = mBondStateMachine.obtainMessage(BondStateMachine.REMOVE_BOND);
         msg.obj = device;
         mBondStateMachine.sendMessage(msg);
@@ -2713,6 +2715,8 @@ public class AdapterService extends Service {
     }
 
     boolean setPhonebookAccessPermission(BluetoothDevice device, int value) {
+        enforceCallingOrSelfPermission(BLUETOOTH_PRIVILEGED,
+                "Need BLUETOOTH PRIVILEGED permission");
         SharedPreferences pref = getSharedPreferences(PHONEBOOK_ACCESS_PERMISSION_PREFERENCE_FILE,
                 Context.MODE_PRIVATE);
         SharedPreferences.Editor editor = pref.edit();
