@@ -72,6 +72,7 @@ public class A2dpService extends ProfileService {
     private static A2dpService sA2dpService;
     private static A2dpSinkService sA2dpSinkService;
     private static boolean mA2dpSrcSnkConcurrency;
+    private static boolean a2dpMulticast = false;
 
     private AdapterService mAdapterService;
     private HandlerThread mStateMachinesThread;
@@ -284,6 +285,10 @@ public class A2dpService extends ProfileService {
         mA2dpSrcSnkConcurrency = SystemProperties.getBoolean(A2DP_CONCURRENCY_SUPPORTED_PROPERTY, false);
         if (DBG) {
             Log.d(TAG, "A2DP concurrency mode set to " + mA2dpSrcSnkConcurrency);
+        }
+        a2dpMulticast = SystemProperties.getBoolean("persist.vendor.service.bt.a2dp_multicast_enable", false);
+        if (DBG) {
+                Log.d(TAG, "A2DP Multicast flag set to " + a2dpMulticast);
         }
         return true;
     }
@@ -711,21 +716,27 @@ public class A2dpService extends ProfileService {
     }
 
     private void storeActiveDeviceVolume() {
-        // Make sure volume has been stored before been removed from active.
-        if (mFactory.getAvrcpTargetService() != null && mActiveDevice != null) {
-            mFactory.getAvrcpTargetService().storeVolumeForDevice(mActiveDevice);
+        BluetoothDevice activeDevice;
+        synchronized (mStateMachines) {
+            activeDevice = mActiveDevice;
         }
-        if (mActiveDevice != null && mAvrcp_ext != null) {
-            mAvrcp_ext.storeVolumeForDevice(mActiveDevice);
+        // Make sure volume has been stored before been removed from active.
+        if (mFactory.getAvrcpTargetService() != null && activeDevice != null) {
+            mFactory.getAvrcpTargetService().storeVolumeForDevice(activeDevice);
+        }
+        synchronized (mBtAvrcpLock) {
+            if (activeDevice != null && mAvrcp_ext != null) {
+                mAvrcp_ext.storeVolumeForDevice(activeDevice);
+            }
         }
     }
 
     private void removeActiveDevice(boolean forceStopPlayingAudio) {
         BluetoothDevice previousActiveDevice = mActiveDevice;
-        synchronized (mBtA2dpLock) {
-            // Make sure volume has been store before device been remove from active.
-            storeActiveDeviceVolume();
 
+        // Make sure volume has been store before device been remove from active.
+        storeActiveDeviceVolume();
+        synchronized (mBtA2dpLock) {
             // This needs to happen before we inform the audio manager that the device
             // disconnected. Please see comment in updateAndBroadcastActiveDevice() for why.
             updateAndBroadcastActiveDevice(null);
@@ -978,8 +989,11 @@ public class A2dpService extends ProfileService {
                 Log.e(TAG,"adapterService is null");
             }
         }
-        if (mAvrcp_ext != null && !tws_switch) {
-            mAvrcp_ext.setAbsVolumeFlag(device);
+        // Don't update the absVolume flags when disconnect one device in multicast mode
+        if (!a2dpMulticast || previousActiveDevice == null) {
+            if (mAvrcp_ext != null && !tws_switch) {
+                mAvrcp_ext.setAbsVolumeFlag(device);
+            }
         }
         tws_switch = false;
         return true;
@@ -1068,6 +1082,18 @@ public class A2dpService extends ProfileService {
             if(mGattService != null) {
                 Log.d(TAG, "Enable BLE scanning");
                 mGattService.setAptXLowLatencyMode(false);
+            }
+        }
+    }
+
+    public void storeDeviceAudioVolume(BluetoothDevice device) {
+        if (device != null)
+        {
+            if (AvrcpTargetService.get() != null) {
+                AvrcpTargetService.get().storeVolumeForDevice(device);
+            } else if (mAvrcp_ext != null) {
+                //store volume in multi-a2dp for the device doesn't set as active
+                mAvrcp_ext.storeVolumeForDevice(device);
             }
         }
     }
