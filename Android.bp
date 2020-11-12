@@ -4,7 +4,7 @@ soong_namespace {
 // MAP API module
 
 java_library {
-    name: "bluetooth_qti.mapsapi",
+    name: "bluetooth.mapsapi",
 
     srcs: ["lib/mapapi/**/*.java"],
 }
@@ -12,13 +12,12 @@ java_library {
 // Bluetooth APK
 
 android_app {
-    name: "BluetoothQti",
-    overrides: ["Bluetooth"],
+    name: "Bluetooth",
 
     srcs: [
         "src/**/*.java",
         ":vendor_qcom_opensource_commonsys_bluetooth_ext_packages_apps_bluetooth_ext",
-        ":statslog-bluetooth_qti-java-gen",
+        ":statslog-bluetooth-java-gen",
     ],
     platform_apis: true,
     certificate: "platform",
@@ -31,7 +30,7 @@ android_app {
     ],
     static_libs: [
         "com.android.vcard",
-        "bluetooth_qti.mapsapi",
+        "bluetooth.mapsapi",
         "sap-api-java-static",
         "services.net",
         "libprotobuf-java-lite",
@@ -52,7 +51,7 @@ android_app {
     optimize: {
         enabled: false,
     },
-    required: ["libbluetooth_qti"],
+    required: ["libbluetooth"],
 
     proto: {
         type: "micro",
@@ -60,7 +59,7 @@ android_app {
 }
 
 genrule {
-    name: "statslog-bluetooth_qti-java-gen",
+    name: "statslog-bluetooth-java-gen",
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --java $(out) --module bluetooth"
         + " --javaPackage com.android.bluetooth --javaClass BluetoothStatsLog --worksource",
