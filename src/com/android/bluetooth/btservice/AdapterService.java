@@ -112,6 +112,7 @@ import com.android.bluetooth.Utils;
 import com.android.bluetooth.a2dp.A2dpService;
 import com.android.bluetooth.a2dpsink.A2dpSinkService;
 import com.android.bluetooth.btservice.RemoteDevices.DeviceProperties;
+import com.android.bluetooth.btservice.bluetoothkeystore.BluetoothKeystoreService;
 import com.android.bluetooth.btservice.storage.DatabaseManager;
 import com.android.bluetooth.btservice.storage.MetadataDatabase;
 import com.android.bluetooth.gatt.GattService;
@@ -175,6 +176,7 @@ public class AdapterService extends Service {
             "com.android.bluetooth.btservice.action.STATE_CHANGED";
     public static final String EXTRA_ACTION = "action";
     public static final int PROFILE_CONN_REJECTED = 2;
+    public static final int  SOFT_AP_BAND_DUAL = 1 << 3;
 
     private static final String ACTION_ALARM_WAKEUP =
             "com.android.bluetooth.btservice.action.ALARM_WAKEUP";
@@ -200,6 +202,7 @@ public class AdapterService extends Service {
 
     private static final int CONTROLLER_ENERGY_UPDATE_TIMEOUT_MILLIS = 30;
     private static final int DELAY_A2DP_SLEEP_MILLIS = 100;
+    private static final int TYPE_BREDR = 100;
 
     private final ArrayList<DiscoveringPackage> mDiscoveringPackages = new ArrayList<>();
 
@@ -267,6 +270,7 @@ public class AdapterService extends Service {
     private AppOpsManager mAppOps;
     private VendorSocket mVendorSocket;
 
+    private BluetoothKeystoreService mBluetoothKeystoreService;
     private A2dpService mA2dpService;
     private A2dpSinkService mA2dpSinkService;
     private HeadsetService mHeadsetService;
@@ -566,7 +570,13 @@ public class AdapterService extends Service {
         mAdapterStateMachine =  AdapterState.make(this);
         mJniCallbacks = new JniCallbacks(this, mAdapterProperties);
         mVendorSocket = new VendorSocket(this);
-        initNative(isGuest(), isSingleUserMode());
+        // Android TV doesn't show consent dialogs for just works and encryption only le pairing
+        boolean isAtvDevice = getApplicationContext().getPackageManager().hasSystemFeature(
+                PackageManager.FEATURE_LEANBACK_ONLY);
+        mBluetoothKeystoreService = new BluetoothKeystoreService(isNiapMode());
+        mBluetoothKeystoreService.start();
+        int configCompareResult = mBluetoothKeystoreService.getCompareResult();
+        initNative(isGuest(), isNiapMode(), configCompareResult, isAtvDevice);
         mNativeAvailable = true;
         mCallbacks = new RemoteCallbackList<IBluetoothCallback>();
         mAppOps = getSystemService(AppOpsManager.class);
@@ -580,6 +590,8 @@ public class AdapterService extends Service {
         mBatteryStats = IBatteryStats.Stub.asInterface(
                 ServiceManager.getService(BatteryStats.SERVICE_NAME));
 
+        mBluetoothKeystoreService.initJni();
+
         mSdpManager = SdpManager.init(this);
         registerReceiver(mAlarmBroadcastReceiver, new IntentFilter(ACTION_ALARM_WAKEUP));
         IntentFilter wifiFilter = new IntentFilter();
@@ -589,6 +601,9 @@ public class AdapterService extends Service {
         registerReceiver(mWifiStateBroadcastReceiver, wifiFilter);
         mProfileObserver = new ProfileObserver(getApplicationContext(), this, new Handler());
         mProfileObserver.start();
+
+        mDatabaseManager = new DatabaseManager(this);
+        mDatabaseManager.start(MetadataDatabase.createDatabase(this));
 
         // Phone policy is specific to phone implementations and hence if a device wants to exclude
         // it out then it can be disabled by using the flag below.
@@ -603,9 +618,6 @@ public class AdapterService extends Service {
 
         mActiveDeviceManager = new ActiveDeviceManager(this, new ServiceFactory());
         mActiveDeviceManager.start();
-
-        mDatabaseManager = new DatabaseManager(this);
-        mDatabaseManager.start(MetadataDatabase.createDatabase(this));
 
         mSilenceDeviceManager = new SilenceDeviceManager(this, new ServiceFactory(),
                 Looper.getMainLooper());
@@ -953,6 +965,10 @@ public class AdapterService extends Service {
         if (mSdpManager != null) {
             mSdpManager.cleanup();
             mSdpManager = null;
+        }
+
+        if (mBluetoothKeystoreService != null) {
+            mBluetoothKeystoreService.cleanup();
         }
 
         if (mNativeAvailable) {
@@ -2139,6 +2155,11 @@ public class AdapterService extends Service {
         }
 
         @Override
+        public boolean isBroadcastActive() {
+            return false;
+        }
+
+        @Override
         public boolean factoryReset() {
             AdapterService service = getService();
             if (service == null) {
@@ -2149,6 +2170,9 @@ public class AdapterService extends Service {
                 service.onBrEdrDown();
             } else {
                 service.disable();
+            }
+            if (service.mBluetoothKeystoreService != null) {
+                service.mBluetoothKeystoreService.factoryReset();
             }
             return service.factoryReset();
         }
@@ -2374,6 +2398,9 @@ public class AdapterService extends Service {
 
             return service.startClockSync();
         }
+
+        @Override
+        public int getDeviceType(BluetoothDevice device) { return TYPE_BREDR; }
 
         @Override
         public void dump(FileDescriptor fd, String[] args) {
@@ -3125,6 +3152,11 @@ public class AdapterService extends Service {
             Log.i(TAG, "disconnectAllEnabledProfiles: Disconnecting Hearing Aid Profile");
             mHearingAidService.disconnect(device);
         }
+        if (mSapService != null && mSapService.getConnectionState(device)
+                == BluetoothProfile.STATE_CONNECTED) {
+            Log.i(TAG, "disconnectAllEnabledProfiles: Disconnecting Sap Profile");
+            mSapService.disconnect(device);
+        }
 
         return true;
     }
@@ -3301,7 +3333,7 @@ public class AdapterService extends Service {
         return mSilenceDeviceManager.getSilenceMode(device);
     }
 
-    boolean setPhonebookAccessPermission(BluetoothDevice device, int value) {
+    public boolean setPhonebookAccessPermission(BluetoothDevice device, int value) {
         enforceCallingOrSelfPermission(BLUETOOTH_PRIVILEGED,
                 "Need BLUETOOTH PRIVILEGED permission");
         SharedPreferences pref = getSharedPreferences(PHONEBOOK_ACCESS_PERMISSION_PREFERENCE_FILE,
@@ -3327,7 +3359,7 @@ public class AdapterService extends Service {
                 : BluetoothDevice.ACCESS_REJECTED;
     }
 
-    boolean setMessageAccessPermission(BluetoothDevice device, int value) {
+    public boolean setMessageAccessPermission(BluetoothDevice device, int value) {
         enforceCallingOrSelfPermission(BLUETOOTH_PRIVILEGED,
                 "Need BLUETOOTH PRIVILEGED permission");
         SharedPreferences pref = getSharedPreferences(MESSAGE_ACCESS_PERMISSION_PREFERENCE_FILE,
@@ -3353,7 +3385,7 @@ public class AdapterService extends Service {
                 : BluetoothDevice.ACCESS_REJECTED;
     }
 
-    boolean setSimAccessPermission(BluetoothDevice device, int value) {
+    public boolean setSimAccessPermission(BluetoothDevice device, int value) {
         enforceCallingOrSelfPermission(BLUETOOTH_PRIVILEGED,
                 "Need BLUETOOTH PRIVILEGED permission");
         SharedPreferences pref =
@@ -4204,8 +4236,8 @@ public class AdapterService extends Service {
         return UserManager.get(this).isGuestUser();
     }
 
-    private boolean isSingleUserMode() {
-        return UserManager.get(this).hasUserRestriction(UserManager.DISALLOW_ADD_USER);
+    private boolean isNiapMode() {
+        return Settings.Global.getInt(getContentResolver(), "niap_mode", 0) == 1;
     }
 
     /**
@@ -4223,13 +4255,21 @@ public class AdapterService extends Service {
     }
 
     private boolean isPowerbackRequired() {
+
         try {
 
             WifiManager mWifiManager = (WifiManager)getSystemService(Context.WIFI_SERVICE);
             final SoftApConfiguration config = mWifiManager.getSoftApConfiguration();
+
+            if (config != null)
+                    Log.d(TAG, "Soft AP is on band: " + config.getBand());
+
             if ((mWifiManager != null) && ((mWifiManager.isWifiEnabled() ||
                 ((mWifiManager.getWifiApState() == WifiManager.WIFI_AP_STATE_ENABLED) &&
-                ((config.getBand() & SoftApConfiguration.BAND_5GHZ) != 0))))) {
+                (config != null) &&
+                (((config.getBand() & SoftApConfiguration.BAND_5GHZ) != 0) ||
+                ((config.getBand() & SoftApConfiguration.BAND_6GHZ) != 0) ||
+                ((config.getBand() & SOFT_AP_BAND_DUAL) !=0 )))))) {
                 return true;
             }
             return false;
@@ -4241,7 +4281,8 @@ public class AdapterService extends Service {
 
     static native void classInitNative();
 
-    native boolean initNative(boolean startRestricted, boolean isSingleUserMode);
+    native boolean initNative(boolean startRestricted, boolean isNiapMode,
+                              int configCompareResult, boolean isAtvDevice);
 
     native void cleanupNative();
 
@@ -4270,13 +4311,13 @@ public class AdapterService extends Service {
     native boolean getDevicePropertyNative(byte[] address, int type);
 
     /*package*/
-    native boolean createBondNative(byte[] address, int transport);
+    public native boolean createBondNative(byte[] address, int transport);
 
     /*package*/
     native boolean createBondOutOfBandNative(byte[] address, int transport, OobData oobData);
 
     /*package*/
-    native boolean removeBondNative(byte[] address);
+    public native boolean removeBondNative(byte[] address);
 
     /*package*/
     native boolean cancelBondNative(byte[] address);
