@@ -1805,7 +1805,7 @@ public class HeadsetService extends ProfileService {
                         Log.d(TAG, "stopScoUsingVirtualVoiceCall Adv Audio enabled");
                         CallAudioIntf mCallAudio = CallAudioIntf.get();
                         if (mCallAudio != null) {
-                            mCallAudio.remoteDisconnectVirtualVoiceCall(mActiveDevice);
+                            mCallAudio.stopScoUsingVirtualVoiceCall();
                         }
                     } else if (!stopScoUsingVirtualVoiceCall()) {
                         Log.w(TAG, "setActiveDevice: fail to stopScoUsingVirtualVoiceCall from "
@@ -2400,7 +2400,7 @@ public class HeadsetService extends ProfileService {
                     if (ApmConstIntf.getLeAudioEnabled()) {
                         CallAudioIntf mCallAudio = CallAudioIntf.get();
                        if (mCallAudio != null) {
-                           mCallAudio.remoteDisconnectVirtualVoiceCall(mActiveDevice);
+                           mCallAudio.stopScoUsingVirtualVoiceCall();
                        }
                     } else {
                         stopScoUsingVirtualVoiceCall();
@@ -2709,7 +2709,7 @@ public class HeadsetService extends ProfileService {
                             if(ApmConstIntf.getLeAudioEnabled()) {
                                 CallAudioIntf mCallAudio = CallAudioIntf.get();
                                 if(mCallAudio != null) {
-                                    mCallAudio.remoteDisconnectVirtualVoiceCall(device);
+                                    mCallAudio.stopScoUsingVirtualVoiceCall();
                                 }
                             } else {
                                 if (!stopScoUsingVirtualVoiceCall()) {
