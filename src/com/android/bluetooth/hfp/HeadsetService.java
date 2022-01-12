@@ -2510,11 +2510,6 @@ public class HeadsetService extends ProfileService {
                     }
                 }
             }
-            mStateMachinesThread.getThreadHandler().post(() -> {
-                mSystemInterface.getHeadsetPhoneState().setNumActiveCall(numActive);
-                mSystemInterface.getHeadsetPhoneState().setNumHeldCall(numHeld);
-                mSystemInterface.getHeadsetPhoneState().setCallState(callState);
-            });
             List<BluetoothDevice> availableDevices =
                         getDevicesMatchingConnectionStates(CONNECTING_CONNECTED_STATES);
             if(availableDevices.size() > 0) {
@@ -2523,7 +2518,10 @@ public class HeadsetService extends ProfileService {
                 doForEachConnectedConnectingStateMachine(
                    stateMachine -> stateMachine.sendMessage(HeadsetStateMachine.CALL_STATE_CHANGED,
                         new HeadsetCallState(numActive, numHeld, callState, number, type, name)));
-                mStateMachinesThread.getThreadHandler().post(() -> {
+                 mStateMachinesThread.getThreadHandler().post(() -> {
+                    mSystemInterface.getHeadsetPhoneState().setNumActiveCall(numActive);
+                    mSystemInterface.getHeadsetPhoneState().setNumHeldCall(numHeld);
+                    mSystemInterface.getHeadsetPhoneState().setCallState(callState);
                     if (!(mSystemInterface.isInCall() || mSystemInterface.isRinging())) {
                         Log.i(TAG, "no call, sending resume A2DP message to state machines");
                         for (BluetoothDevice device : availableDevices) {
@@ -2538,7 +2536,10 @@ public class HeadsetService extends ProfileService {
                     }
                 });
             } else {
-                mStateMachinesThread.getThreadHandler().post(() -> {
+                  mStateMachinesThread.getThreadHandler().post(() -> {
+                    mSystemInterface.getHeadsetPhoneState().setNumActiveCall(numActive);
+                    mSystemInterface.getHeadsetPhoneState().setNumHeldCall(numHeld);
+                    mSystemInterface.getHeadsetPhoneState().setCallState(callState);
                     if (!(mSystemInterface.isInCall() || mSystemInterface.isRinging())) {
                         //If no device is connected, resume A2DP if there is no call
                         Log.i(TAG, "No device is connected and no call, " +
@@ -2550,9 +2551,9 @@ public class HeadsetService extends ProfileService {
                                    "set A2DPsuspended to true");
                         mHfpA2dpSyncInterface.suspendA2DP(HeadsetA2dpSync.
                                                       A2DP_SUSPENDED_BY_CS_CALL, null);
-                    }
-                });
-            }
+                }
+             });
+           }
         }
     }
 
